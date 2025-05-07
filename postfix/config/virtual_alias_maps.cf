@@ -1,0 +1,5 @@
+user = php_test_user
+password = php_user_pass
+hosts = database-container
+dbname = php_mysql_db
+query = SELECT destination FROM virtual_aliases WHERE source='%s' AND active='1' 

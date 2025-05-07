@@ -1,0 +1,14 @@
+# Файл auth-sql.conf.ext
+# Определяет настройки аутентификации через SQL
+
+# Настройки пользовательской базы данных
+userdb {
+  driver = sql
+  args = /etc/dovecot/conf.d/dovecot-sql.conf.ext
+}
+
+# Настройки базы данных паролей
+passdb {
+  driver = sql
+  args = /etc/dovecot/conf.d/dovecot-sql.conf.ext
+} 

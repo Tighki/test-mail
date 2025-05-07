@@ -1,0 +1,5 @@
+user = php_test_user
+password = php_user_pass
+hosts = database-container
+dbname = php_mysql_db
+query = SELECT 1 FROM virtual_users WHERE email='%s' AND active='1' 

@@ -1,0 +1,11 @@
+driver = mysql
+connect = host=database-container dbname=php_mysql_db user=php_test_user password=php_user_pass
+
+# Запрос для аутентификации
+password_query = SELECT email as user, password FROM virtual_users WHERE email='%u' AND active='1'
+
+# Запрос для получения информации о пользователе
+user_query = SELECT concat('/var/vmail/', maildir) AS home, 5000 AS uid, 5000 AS gid, concat('*:bytes=', quota) AS quota_rule FROM virtual_users WHERE email='%u' AND active='1'
+
+# Формат хранения пароля
+default_pass_scheme = SHA512-CRYPT 
