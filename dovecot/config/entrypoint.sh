@@ -4,9 +4,19 @@ set -e
 # Создаем необходимые директории, если они не существуют
 mkdir -p /var/vmail
 mkdir -p /var/log/dovecot
+mkdir -p /var/shared
 chown -R vmail:vmail /var/vmail
 chmod -R 0770 /var/vmail
 chown -R dovecot:dovecot /var/log/dovecot
+
+# Настройка hosts для разрешения имени postfix
+if [ -n "$POSTFIX_HOST" ]; then
+    echo "$POSTFIX_HOST postfix" >> /etc/hosts
+    echo "Добавлен хост postfix ($POSTFIX_HOST) в /etc/hosts"
+else
+    echo "172.18.0.1 postfix" >> /etc/hosts
+    echo "Внимание: POSTFIX_HOST не определен, используется 172.18.0.1"
+fi
 
 # Проверяем наличие группы postfix, создаем при необходимости
 if ! getent group postfix > /dev/null; then
@@ -20,11 +30,9 @@ if [ ! -f /etc/dovecot/dh.pem ]; then
     chmod 644 /etc/dovecot/dh.pem
 fi
 
-# Проверяем доступ к директории spool Postfix
-if [ ! -d /var/spool/postfix/private ]; then
-    mkdir -p /var/spool/postfix/private
-    chmod 700 /var/spool/postfix/private
-fi
+# Создаем shared директорию для коммуникации с Postfix вместо сетевого соединения
+mkdir -p /var/shared/postfix-dovecot
+chmod 777 /var/shared/postfix-dovecot
 
 # Ожидаем доступности MySQL
 echo "Ожидание доступности MySQL-сервера..."
@@ -33,14 +41,6 @@ until nc -z database-container 3306; do
     sleep 2
 done
 echo "MySQL доступен!"
-
-# Ожидаем доступности Postfix
-echo "Ожидание доступности Postfix..."
-until nc -z postfix 25; do
-    echo "Postfix недоступен, ожидаем..."
-    sleep 2
-done
-echo "Postfix доступен!"
 
 # Установка часового пояса из переменной окружения
 if [ -n "$TZ" ]; then

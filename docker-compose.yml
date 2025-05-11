@@ -1,3 +1,5 @@
+version: '3'
+
 services:
   # PHP Application Service
   php:
@@ -17,52 +19,43 @@ services:
     networks:
       - web
     restart: always
+    environment:
+      - APACHE_SERVER_NAME=localhost
 
   # Database Container Service
   database-container:
-    container_name: mysql
-    # Get MySQL image from Docker Hub
-    image: mysql:5.7
-    volumes:
-      # local ./src directory contains PHP code
-      # Mount it to the to /var/www/html on the container
-      - ./mysql/my.cnf:/etc/my.cnf:ro
-      - ./mysql/data:/var/lib/mysql:rw
-      - ./mysql/mail_schema.sql:/docker-entrypoint-initdb.d/mail_schema.sql:ro
-    environment:
-      # Set the MySQL root password
-      MYSQL_ROOT_PASSWORD: php_mysql_pass
-      # Create your MySQL database user
-      MYSQL_USER: php_test_user
-      # Create a sample MySQL database
-      MYSQL_DATABASE: php_mysql_db
-      #Add the password for the MySQL user
-      MYSQL_PASSWORD: php_user_pass
-    ports:
-      # MySQL port
-      - "3306:3306"
-    networks:
-      - web
+    image: mysql:8.0
+    container_name: database-container
     restart: always
+    volumes:
+      - ./mysql/mail_schema.sql:/docker-entrypoint-initdb.d/mail_schema.sql
+      - mysql_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: mail
+      MYSQL_USER: ${MYSQL_USER:-mailuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mailuserpass}
+    networks:
+      - mail_network
 
   # PhpMyAdmin Service
   phpmyadmin:
+    image: phpmyadmin/phpmyadmin
     container_name: phpmyadmin
-    image: phpmyadmin:latest
-    links:
-      # Link the MySQL service to allow phpmyadmin access to the MySQL server
-      - database-container
-    ports:
-      - "82:80"
-    networks:
-      - web
-    environment:
-    # PhpMyAdmin host is a MySQL Database container
-      PMA_HOST: database-container 
-      # Set the MySQL root password to open PhpMyAdmin on the web
-      MYSQL_ROOT_PASSWORD: php_mysql_pass
     restart: always
-    
+    ports:
+      - "8080:80"
+    environment:
+      PMA_HOST: database-container
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      APACHE_SERVER_NAME: phpmyadmin
+    depends_on:
+      - database-container
+    networks:
+      - mail_network
+
   openldap:
     image: osixia/openldap:latest
     container_name: openldap
@@ -107,95 +100,88 @@ services:
     restart: always
     
   nginx:
+    image: nginx:stable-alpine
     container_name: nginx
-    image: nginx:1.11
     restart: always
-    depends_on:
-      - php
-    networks:
-      - web
     ports:
-      - 80:80
-      - 443:443
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./certbot/conf:/etc/nginx/ssl
-      - ./nginx/conf:/etc/nginx/conf.d
-      - ./certbot/data:/var/www/html
-  certbot:
-    container_name: certbot
-    image: certbot/certbot:latest
-    command: certonly --non-interactive --force-renewal --webroot --webroot-path=/var/www/html --email gusarov.as@fltrktv.ru --agree-tos --no-eff-email -d fltrktv.ru -d www.fltrktv.ru
+      - ./nginx/config:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/html:/usr/share/nginx/html
+      - ./nginx/log:/var/log/nginx
+    depends_on:
+      - postfix
+      - dovecot
     networks:
-      - web
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/logs:/var/log/letsencrypt
-      - ./certbot/data:/var/www/html
+      - mail_network
 
   # Почтовый сервер Postfix 
   postfix:
+    build: ./postfix
     container_name: postfix
-    build: 
-      context: ./postfix
-      dockerfile: Dockerfile
-    hostname: mail.ramhlocal.com
-    ports:
-      - "25:25"      # SMTP
-      - "587:587"    # SUBMISSION 
-      - "465:465"    # SMTPS
-    volumes:
-      - ./postfix/config:/etc/postfix
-      - ./postfix/spool:/var/spool/postfix
-      - ./postfix/log:/var/log
-      - ./data/mail:/var/mail
-      - mail-data:/var/vmail
-    environment:
-      - MAILNAME=ramhlocal.com
-      - MYNETWORKS=127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128 172.16.0.0/12 192.168.0.0/16
-      - TZ=Europe/Moscow
-    networks:
-      - web
-      - mail_network
     restart: always
+    ports:
+      - "25:25"
+      - "587:587"
+      - "465:465"
+    volumes:
+      - ./postfix/config:/etc/postfix/config
+      - ./postfix/certs:/etc/postfix/certs
+      - ./postfix/log:/var/log
+      - shared_data:/var/shared
     depends_on:
       - database-container
+    environment:
+      MYSQL_SERVER: database-container
+      MYSQL_DATABASE: mail
+      MYSQL_USER: ${MYSQL_USER:-mailuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mailuserpass}
+      HOSTNAME: ${MAIL_DOMAIN:-mail.example.com}
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      mail_network:
+        ipv4_address: 172.18.0.3
 
   # IMAP/POP3 сервер Dovecot
   dovecot:
+    build: ./dovecot
     container_name: dovecot
-    build: 
-      context: ./dovecot
-      dockerfile: Dockerfile
-    hostname: mail.ramhlocal.com
+    restart: always
     ports:
-      - "110:110"    # POP3
-      - "995:995"    # POP3S
-      - "143:143"    # IMAP
-      - "993:993"    # IMAPS
-      - "4190:4190"  # ManageSieve
+      - "110:110"
+      - "143:143"
+      - "993:993"
+      - "995:995"
     volumes:
       - ./dovecot/config:/etc/dovecot
-      - ./dovecot/log:/var/log/dovecot
-      - ./data/mail:/var/mail
-      - mail-data:/var/vmail
-      - ./postfix/spool:/var/spool/postfix
-    environment:
-      - MAILNAME=ramhlocal.com
-      - TZ=Europe/Moscow
-    networks:
-      - web
-      - mail_network
-    restart: always
+      - ./dovecot/log:/var/log
+      - vmail_data:/var/vmail
+      - shared_data:/var/shared
     depends_on:
-      - postfix
       - database-container
+      - postfix
+    environment:
+      MYSQL_SERVER: database-container
+      MYSQL_DATABASE: mail
+      MYSQL_USER: ${MYSQL_USER:-mailuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mailuserpass}
+      POSTFIX_HOST: 172.18.0.3
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      - mail_network
+
+volumes:
+  mysql_data:
+  vmail_data:
+  shared_data:
 
 networks:
   web:
     driver: bridge
   mail_network:
     driver: bridge
-
-volumes:
-  mail-data:
-    driver: local
+    ipam:
+      config:
+        - subnet: 172.18.0.0/24

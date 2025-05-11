@@ -1,45 +1,42 @@
 FROM debian:bullseye-slim
 
-# Установка Postfix и необходимых утилит
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+# Установка времинной зоны
+ENV TZ=Europe/Moscow
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Установка зависимостей и Postfix
+RUN apt-get update && apt-get install -y \
     postfix \
     postfix-mysql \
-    postfix-ldap \
     libsasl2-modules \
-    opendkim \
-    opendkim-tools \
-    ca-certificates \
-    mailutils \
+    openssl \
     supervisor \
-    rsyslog \
     netcat-openbsd \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Копирование конфигурационных файлов
-COPY config/main.cf /etc/postfix/main.cf
-COPY config/master.cf /etc/postfix/master.cf
-COPY config/virtual_mailbox_domains.cf /etc/postfix/virtual_mailbox_domains.cf
-COPY config/virtual_mailbox_maps.cf /etc/postfix/virtual_mailbox_maps.cf
-COPY config/virtual_alias_maps.cf /etc/postfix/virtual_alias_maps.cf
-COPY config/sasl/smtpd.conf /etc/postfix/sasl/smtpd.conf
+# Создание директорий для supervisor и логов
+RUN mkdir -p /var/log/supervisor
+RUN mkdir -p /var/spool/postfix/pid
+
+# Настройка hostname для корректного разрешения имен
+RUN echo "127.0.0.1 postfix" >> /etc/hosts
+RUN echo "postfix" > /etc/hostname
+RUN hostname postfix
+
+# Копирование конфигурации Supervisor
 COPY config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Создание необходимых директорий и прав доступа
-RUN mkdir -p /var/spool/postfix/private \
-    && mkdir -p /var/spool/postfix/public \
-    && groupadd -g 5000 vmail \
-    && useradd -g vmail -u 5000 vmail -d /var/vmail -m \
-    && chown -R postfix:postfix /var/spool/postfix
-
-# Создание скрипта инициализации
+# Копирование скрипта инициализации
 COPY config/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Экспозиция портов
+# Открытие портов для SMTP, SUBMISSION, SMTPS
 EXPOSE 25 587 465
 
-# Запуск через entrypoint и supervisor
+# Запуск entrypoint скрипта для инициализации
 ENTRYPOINT ["/entrypoint.sh"]
+
+# Запуск supervisord в качестве основного процесса
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 
